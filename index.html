@@ -9,11 +9,21 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Montserrat', sans-serif; background: var(--bg-color); color: #FFF; }
     .top-bar { display: flex; align-items: center; background: var(--bg-color); padding: 10px 14px; }
-    .top-bar h1 { font-size: 16px; font-weight: bold; color: var(--primary-color); text-transform: uppercase; }
+    /* Mueve el título 3px hacia abajo */
+    .top-bar h1 { 
+      font-size: 16px; 
+      font-weight: bold; 
+      color: var(--primary-color); 
+      text-transform: uppercase;
+      position: relative;
+      top: 3px;
+    }
     .container { padding: 12px; }
     .input-field { width: 100%; padding: 10px; background: #1c1b24; border: 2px solid var(--primary-color); border-radius: 8px; color: #FFF; margin-bottom: 8px; font-size: 14px; }
     .buttons { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
     .buttons .row { display: flex; gap: 6px; }
+    /* Oculta/elimina el botón de desencriptar */
+    #decryptBtn { display: none; }
     .buttons button { flex: 1; padding: 8px; background: #121119; border: 2px solid var(--primary-color); border-radius: 8px; color: var(--primary-color); font-size: 13px; cursor: pointer; text-transform: uppercase; font-weight: bold; }
     .buttons button:disabled { opacity: 0.5; cursor: not-allowed; }
     .gallery { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
@@ -40,7 +50,7 @@
   </div>
 
   <header class="top-bar">
-    <h1>CENTRO DE DESCARGA DE GIFFANY</h1>
+    <h1>CENTRO DE DESCARGA DE SKYCOMIX</h1>
   </header>
 
   <main class="container">
@@ -57,43 +67,16 @@
 
   <script>
     let imageUrls = [];
-    let userName = '';  // guardamos aquí el nombre extraído
+    let userName = '';
 
     const { jsPDF } = window.jspdf;
     const JSZip = window.JSZip;
 
-    // Función para formatear: elimina guiones bajos, pasa a minúsculas y capitaliza la primera letra
     function formatFileName(name) {
       const withSpaces = name.replace(/_/g, ' ');
       const lower = withSpaces.toLowerCase();
       return lower.charAt(0).toUpperCase() + lower.slice(1);
     }
-
-    // 1) Desencriptar y extraer name + URLs
-    document.getElementById('decryptBtn').addEventListener('click', () => {
-      const data = document.getElementById('encryptedLinks').value.trim();
-      const gallery = document.getElementById('imageGallery');
-      gallery.innerHTML = '';
-      try {
-        const parsed = JSON.parse(atob(data));
-        userName = parsed.name.trim();    // recogemos el nombre crudo
-        imageUrls = parsed.urls || [];
-
-        // mostrar imágenes
-        imageUrls.forEach(src => {
-          const img = document.createElement('img');
-          img.src = src;
-          gallery.appendChild(img);
-        });
-
-        // habilitar botones
-        const hasImages = imageUrls.length > 0;
-        document.getElementById('downloadPdfBtn').disabled = !hasImages;
-        document.getElementById('downloadZipBtn').disabled = !hasImages;
-      } catch {
-        alert('Formato de datos inválido');
-      }
-    });
 
     function showOverlay(label) {
       document.getElementById('overlayLabel').textContent = label;
@@ -114,7 +97,6 @@
         const proxy = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(imageUrls[i])}`;
         const res = await fetch(proxy);
         const blob = await res.blob();
-        // Asignar nombre secuencial: “imagen X.png”
         const fileName = `imagen ${i + 1}.png`;
         blobs.push({ blob, name: fileName });
         updateProgress(i + 1, imageUrls.length);
@@ -130,7 +112,27 @@
       });
     }
 
-    // 2) Descargar como PDF con nombre formateado
+    async function doDecrypt() {
+      const data = document.getElementById('encryptedLinks').value.trim();
+      const gallery = document.getElementById('imageGallery');
+      gallery.innerHTML = '';
+      try {
+        const parsed = JSON.parse(atob(data));
+        userName = parsed.name.trim();
+        imageUrls = parsed.urls || [];
+        imageUrls.forEach(src => {
+          const img = document.createElement('img');
+          img.src = src;
+          gallery.appendChild(img);
+        });
+        const hasImages = imageUrls.length > 0;
+        document.getElementById('downloadPdfBtn').disabled = !hasImages;
+        document.getElementById('downloadZipBtn').disabled = !hasImages;
+      } catch {
+        alert('Formato de datos inválido');
+      }
+    }
+
     document.getElementById('downloadPdfBtn').addEventListener('click', async () => {
       const fileName = formatFileName(userName || 'Download');
       showOverlay('Descargando PDF...');
@@ -156,7 +158,6 @@
       hideOverlay();
     });
 
-    // 3) Descargar como ZIP con nombre formateado
     document.getElementById('downloadZipBtn').addEventListener('click', async () => {
       const fileName = formatFileName(userName || 'Download');
       showOverlay('Descargando .Zip...');
@@ -165,11 +166,53 @@
       blobs.forEach(({ blob, name }) => zip.file(name, blob));
       const content = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
-
       link.href = URL.createObjectURL(content);
       link.download = `${fileName}.zip`;
       link.click();
       hideOverlay();
+    });
+
+    // Automático con permiso guardado en localStorage
+
+    async function autoPasteAndDecrypt() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim()) {
+          document.getElementById('encryptedLinks').value = text.trim();
+          doDecrypt();
+        }
+      } catch (err) {
+        console.warn('No se pudo leer el portapapeles automáticamente:', err);
+      }
+    }
+
+    function requestClipboardPermission() {
+      const allow = confirm('¿Deseas permitir el pegado automático del contenido del portapapeles en futuras cargas?');
+      if (allow) {
+        localStorage.setItem('autoPasteAllowed', 'true');
+        autoPasteAndDecrypt();
+      } else {
+        localStorage.setItem('autoPasteAllowed', 'false');
+      }
+    }
+
+    function ensureClipboardPermission() {
+      const flag = localStorage.getItem('autoPasteAllowed');
+      if (flag === 'true') {
+        autoPasteAndDecrypt();
+      } else if (flag === null) {
+        requestClipboardPermission();
+      }
+    }
+
+    window.addEventListener('load', () => {
+      ensureClipboardPermission();
+    });
+
+    window.addEventListener('focus', () => {
+      if (localStorage.getItem('autoPasteAllowed') === 'true') {
+        autoPasteAndDecrypt();
+      }
     });
   </script>
 </body>
